@@ -5,22 +5,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 )
 
-var (
-	insertCache  sync.Map
-	upsertCache  sync.Map
-	dedupMapPool = sync.Pool{
-		New: func() interface{} {
-			return make(map[string]struct{})
-		},
-	}
-)
-
-// Options for building insert statement
-type InsertOpts struct {
-	// Table to insert into
+// Options for building upsert statement
+type UpsertOpts struct {
+	// Table to upsert into
 	Table string
 
 	// Struct that will have all its public fields written to the database.
@@ -33,6 +22,11 @@ type InsertOpts struct {
 	// Examples: `db:"name,string"` `db:",string"`
 	//
 	// Fields with a `db:"-"` tag will be skipped
+	//
+	// Fields with `db:"unique"` will be set as such including primary key(s)
+	// This will only work if all unique fields are primary keys (for now)
+	// This won't work if primary key is auto-generated
+	// This
 	//
 	// First the fields in struct itself are scanned and then the fields in any
 	// embedded structs using depth first search.
@@ -47,11 +41,11 @@ type InsertOpts struct {
 	Suffix string
 }
 
-// Build and cache insert statement for all fields of data. This includes
+// Build and cache upsert statement for all fields of data. This includes
 // embedded struct fields.
 //
-// See InsertOpts for further documentation.
-func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
+// See UpsertOpts for further documentation.
+func BuildUpsert(o UpsertOpts) (sql string, args []interface{}) {
 	rootT := reflect.TypeOf(o.Data)
 	k := struct {
 		table, prefix, suffix string
@@ -62,15 +56,16 @@ func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
 		suffix: o.Suffix,
 		typ:    rootT,
 	}
-	_sql, cached := insertCache.Load(k)
+	_sql, cached := upsertCache.Load(k)
 	if cached {
 		sql = _sql.(string)
 	}
 
 	var (
-		w          strings.Builder
-		scanStruct func(parentV reflect.Value, parentT reflect.Type)
-		dedupMap   = dedupMapPool.Get().(map[string]struct{})
+		w            strings.Builder
+		uniqueFields []string
+		scanStruct   func(parentV reflect.Value, parentT reflect.Type)
+		dedupMap     = dedupMapPool.Get().(map[string]struct{})
 	)
 	defer func() {
 		for k := range dedupMap {
@@ -92,11 +87,19 @@ func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
 			var (
 				f               = parentT.Field(i)
 				name            string
+				unique          bool
 				tag             = f.Tag.Get("db")
 				convertToString bool
 			)
 			if i := strings.IndexByte(tag, ','); i != -1 {
-				convertToString = tag[i+1:] == "string"
+				temp := tag[i+1:]
+				if j := strings.IndexByte(temp, ','); j != -1 {
+					convertToString = temp[j+1:] == "string"
+					tag = tag[:j]
+					fmt.Println(convertToString)
+				}
+				unique = tag[i+1:] == "unique"
+				fmt.Println(unique)
 				tag = tag[:i]
 			}
 			switch tag {
@@ -104,6 +107,9 @@ func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
 				continue
 			case "":
 				name = f.Name
+			case "unique":
+				name = f.Name
+				unique = true
 			default:
 				name = tag
 			}
@@ -128,6 +134,9 @@ func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
 				w.WriteString(name)
 			}
 			dedupMap[name] = struct{}{}
+			if unique {
+				uniqueFields = append(uniqueFields, name)
+			}
 			val := v.Interface()
 			if convertToString {
 				val = fmt.Sprint(val)
@@ -159,21 +168,33 @@ func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
 			}
 			w.WriteByte('$')
 			if i < 9 {
-				w.WriteByte(byte(i) + '0' + 1) // Avoids allocation
+				w.WriteByte(byte(i) + '0' + 1) //  What the fuck???
 			} else {
 				tmp = strconv.AppendUint(tmp[:0], uint64(i+1), 10)
 				w.Write(tmp)
 			}
 		}
-		w.WriteByte(')')
+		w.WriteString(") on conflict (")
+		for i := 0; i < len(uniqueFields); i++ {
+			if i != 0 {
+				w.WriteByte(',')
+			}
+			w.WriteString(uniqueFields[i])
+		}
+		w.WriteString(") do update set ")
+		for name, _ := range dedupMap {
+			fmt.Fprintf(&w, "%[1]s = excluded.%[1]s,", name)
+		}
+		sql = strings.TrimSuffix(w.String(), ",")
 
 		if o.Suffix != "" {
-			w.WriteByte(' ')
-			w.WriteString(o.Suffix)
+			sql = sql + " " + o.Suffix
+			//w.WriteByte(' ')
+			//w.WriteString(o.Suffix)
 		}
 
-		sql = w.String()
-		insertCache.Store(k, sql)
+		//sql = w.String()
+		upsertCache.Store(k, sql)
 	}
 
 	return
