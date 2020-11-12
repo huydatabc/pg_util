@@ -53,10 +53,7 @@ type InsertOpts struct {
 // See InsertOpts for further documentation.
 func BuildInsert(o InsertOpts) (sql string, args []interface{}) {
 	rootT := reflect.TypeOf(o.Data)
-	k := struct {
-		table, prefix, suffix string
-		typ                   reflect.Type
-	}{
+	k := Data{
 		table:  o.Table,
 		prefix: o.Prefix,
 		suffix: o.Suffix,

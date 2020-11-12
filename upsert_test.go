@@ -66,6 +66,19 @@ func TestTestBuildupsert(t *testing.T) {
 			sql:  `insert into t1 (field_1,field_2) values ($1,$2) on conflict (field_1) do update set field_1 = excluded.field_1,field_2 = excluded.field_2`,
 			args: []interface{}{"aaa", 1},
 		},
+		{
+			name: "with name tag and unique tag and constrain",
+			opts: UpsertOpts{
+				Table: "t1",
+				Data: struct {
+					F1 string `db:"field_1,unique"`
+					F2 int    `db:"field_2"`
+				}{"aaa", 1},
+				Constrain: "test_constrain",
+			},
+			sql:  `insert into t1 (field_1,field_2) values ($1,$2) on conflict (test_constrain) do update set field_1 = excluded.field_1,field_2 = excluded.field_2`,
+			args: []interface{}{"aaa", 1},
+		},
 		//{
 		//	name: "with only string tag",
 		//	opts: UpsertOpts{
@@ -106,32 +119,32 @@ func TestTestBuildupsert(t *testing.T) {
 		//		` returning f1`,
 		//	args: []interface{}{"aaa", 1},
 		//},
-		//{
-		//	name: "with embedded struct",
-		//	opts: UpsertOpts{
-		//		Table: "t1",
-		//		Data: struct {
-		//			F1 string
-		//			F2 int
-		//			inner
-		//		}{"aaa", 1, inner{3}},
-		//	},
-		//	sql:  `insert into t1 (F1,F2,F3) values ($1,$2,$3)`,
-		//	args: []interface{}{"aaa", 1, 3},
-		//},
-		//{
-		//	name: "with embedded struct override",
-		//	opts: UpsertOpts{
-		//		Table: "t2",
-		//		Data: struct {
-		//			innerOverlapping
-		//			F1 string
-		//			F2 int
-		//		}{innerOverlapping{3}, "aaa", 1},
-		//	},
-		//	sql:  `insert into t2 (F1,F2) values ($1,$2)`,
-		//	args: []interface{}{"aaa", 1},
-		//},
+		{
+			name: "with embedded struct",
+			opts: UpsertOpts{
+				Table: "t1",
+				Data: struct {
+					F1 string
+					F2 int
+					inner
+				}{"aaa", 1, inner{3}},
+			},
+			sql:  `insert into t1 (F1,F2,F3) values ($1,$2,$3) on conflict () do update set F1 = excluded.F1,F2 = excluded.F2,F3 = excluded.F3`,
+			args: []interface{}{"aaa", 1, 3},
+		},
+		{
+			name: "with embedded struct override",
+			opts: UpsertOpts{
+				Table: "t2",
+				Data: struct {
+					innerOverlapping
+					F1 string
+					F2 int
+				}{innerOverlapping{3}, "aaa", 1},
+			},
+			sql:  `insert into t2 (F1,F2) values ($1,$2) on conflict () do update set F1 = excluded.F1,F2 = excluded.F2`,
+			args: []interface{}{"aaa", 1},
+		},
 		//{
 		//	name: "with many args",
 		//	opts: UpsertOpts{

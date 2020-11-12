@@ -2,14 +2,20 @@ package pg_util
 
 import (
 	"context"
-
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
+	"reflect"
 )
 
 // Interface required to start a transaction or subtransation via savepoints
 type TxStarter interface {
 	Begin(context.Context) (pgx.Tx, error)
+}
+
+// Data struct encapsulate info for insert or upsert and cache checking
+type Data struct {
+	table, prefix, suffix, constrain string
+	typ                              reflect.Type
 }
 
 // InTransaction runs a function inside a transaction and handles commiting
